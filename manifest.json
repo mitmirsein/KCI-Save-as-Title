@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "KCI Save as Title",
+  "version": "1.2", // 버전 업데이트
+  "description": "Downloads KCI papers with their titles as filenames.",
+  "permissions": [
+    "downloads",
+    "storage" // ★★★ 'storage' 권한 추가 ★★★
+  ],
+  "host_permissions": [
+    "*://*.kci.go.kr/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+  // 아이콘 설정은 필요하면 추가
+}
