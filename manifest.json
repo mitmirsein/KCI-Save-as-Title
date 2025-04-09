@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "KCI Save as Title",
-  "version": "1.3", // 아이콘 추가로 버전 업데이트 (선택 사항)
+  "version": "1.3", // 아이콘 추가로 버전 업데이트
   "description": "Downloads KCI papers with their titles as filenames.",
   "permissions": [
     "downloads",
