@@ -30,4 +30,4 @@ KCI(한국학술지인용색인) 논문을 다운로드할 때, 기본 숫자 �
 
 ---
 
-MSNa가 ❤️로 만들었습니다. YunseoDo의 원본 arXiv 확장 프로그램([https://github.com/DoYunseo/arXiv-save-as-Title](https://github.com/DoYunseo/arXiv-save-as-Title))에서 영감을 받았습니다.
+Mitmirsein이 만들었습니다. YunseoDo의 원본 arXiv 확장 프로그램([https://github.com/DoYunseo/arXiv-save-as-Title](https://github.com/DoYunseo/arXiv-save-as-Title))에서 영감을 받았습니다.
