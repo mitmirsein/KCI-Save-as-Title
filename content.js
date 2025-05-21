@@ -1,144 +1,169 @@
-// content.js --- 저널, 볼륨/페이지 정보 추출 및 저장 추가 ---
-
-console.log("[Content Script] KCI Save as Title script injected! Storing extended info on click.");
-
-// 1. 논문 제목 추출 함수 (변경 없음)
-function getPaperTitle() {
-  const titleSelector = '#artiTitle';
-  console.log(`[Content Script] Attempting to find title with selector: "${titleSelector}"`);
-  const titleElement = document.querySelector(titleSelector);
-  if (titleElement) {
-    let title = titleElement.textContent.trim();
-    console.log("[Content Script] Found title using ID:", title);
-    return title;
-  } else {
-    console.warn("[Content Script] Title element not found with specific ID selector:", titleSelector);
-    return null;
-  }
+// content.js
+function getCleanText(element) {
+    if (!element) return "";
+    // 각주(sup), 숨겨진 요소(display:none) 등 제외하고 텍스트 추출 시도
+    let clone = element.cloneNode(true);
+    clone.querySelectorAll('sup, script, style, [style*="display:none"], [style*="display: none"]').forEach(el => el.remove());
+    return clone.innerText.trim();
 }
 
-// 1-1. 저자 정보 추출 함수 (변경 없음)
-function getAuthors() {
-  const authorSelector = 'div.author > a';
-  console.log(`[Content Script] Attempting to find authors with selector: "${authorSelector}"`);
-  const authorElements = document.querySelectorAll(authorSelector);
-  if (authorElements && authorElements.length > 0) {
-    const authorNames = Array.from(authorElements).map(el => {
-      let fullText = el.textContent.trim();
-      let nameOnly = fullText.split('/')[0].trim();
-      nameOnly = nameOnly.replace(/\d+$/, '');
-      return nameOnly;
+function extractAuthors(containerElement, isPopup = false) {
+    let authorsArray = [];
+    if (!containerElement) return "저자없음";
+
+    // 다양한 저자 표시 형식을 포괄하는 선택자 (자식 요소들 순회)
+    // 팝업과 상세 페이지의 저자 구조가 다를 수 있음에 유의
+    const authorElements = isPopup ?
+        Array.from(containerElement.childNodes) : // 팝업은 단순 childNodes 순회 시도
+        containerElement.querySelectorAll('a, span'); // 상세는 a 또는 span 태그 우선
+
+    authorElements.forEach(el => {
+        let authorText = (el.nodeType === Node.TEXT_NODE ? el.textContent : getCleanText(el)).trim();
+        if (authorText) {
+            // 1. 괄호와 그 안의 내용 (영문명, 이메일 등) 제거
+            authorText = authorText.replace(/\s*\(.*?\)\s*/g, '').trim();
+            // 2. 숫자 각주 또는 마지막 숫자 제거
+            authorText = authorText.replace(/\d+$/, '').trim();
+            // 3. 이름 뒤에 붙는 쉼표 제거
+            authorText = authorText.replace(/,$/, '').trim();
+            // 4. 한글 이름인지 확인 (2자 이상)
+            if (authorText.length >= 2 && /^[가-힣\s]+$/.test(authorText)) {
+                if (!authorsArray.includes(authorText)) { // 중복 방지
+                    authorsArray.push(authorText);
+                }
+            }
+        }
     });
-    const uniqueAuthorNames = [...new Set(authorNames)];
-    const authorsString = uniqueAuthorNames.join(', ');
-    console.log("[Content Script] Found and processed unique authors:", authorsString);
-    return authorsString;
-  } else {
-    console.warn("[Content Script] Author elements not found with selector:", authorSelector);
-    return null;
-  }
-}
 
-// ★★★ 1-2. 저널 정보 추출 함수 추가 ★★★
-function getJournalInfo() {
-  const journalSelector = '.journalInfo p.jounal a';
-  console.log(`[Content Script] Attempting to find journal name with selector: "${journalSelector}"`);
-  const journalElement = document.querySelector(journalSelector);
-  if (journalElement) {
-    // a 태그 내부에 불필요한 공백이나 개행이 있을 수 있으므로 textContent 사용 후 trim
-    const journalName = journalElement.textContent.trim();
-    console.log("[Content Script] Found journal name:", journalName);
-    return journalName;
-  } else {
-    console.warn("[Content Script] Journal name element not found with selector:", journalSelector);
-    return null;
-  }
-}
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-// ★★★ 1-3. 볼륨/페이지 정보 추출 및 처리 함수 추가 ★★★
-function getVolumePageInfo() {
-  const volPageSelector = 'p.vol a';
-  console.log(`[Content Script] Attempting to find volume/page info with selector: "${volPageSelector}"`);
-  const volPageElement = document.querySelector(volPageSelector);
-  if (volPageElement) {
-    let fullText = volPageElement.textContent.trim();
-    console.log("[Content Script] Found raw volume/page string:", fullText);
-    // "(...pages)" 부분 제거
-    let cleanedText = fullText.replace(/\s*\(\d+\s*pages\)/, '').trim();
-    // 예시: "2024, vol., no.40, pp. 309-337"
-    // 쉼표 뒤 공백을 제거하거나, 다른 구분자로 변경할 수 있음 (파일명 생성 시 처리)
-    // 여기서는 일단 정리된 텍스트 그대로 반환
-    console.log("[Content Script] Cleaned volume/page string:", cleanedText);
-    return cleanedText;
-  } else {
-    console.warn("[Content Script] Volume/page element not found with selector:", volPageSelector);
-    return null;
-  }
-}
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-
-// 2. 다운로드 링크/버튼 찾고 이벤트 리스너 추가 함수 (저장 로직 수정)
-function addDownloadListener() {
-  const downloadTriggerSelector = "li.green > a[onclick*='fncDown']"; // 이전과 동일
-  console.log(`[Content Script] Attempting to find download trigger with selector: "${downloadTriggerSelector}"`);
-  const downloadTrigger = document.querySelector(downloadTriggerSelector);
-
-  if (downloadTrigger) {
-    console.log("[Content Script] Found download trigger element:", downloadTrigger);
-
-    // --- 클릭 이벤트 리스너 로직 수정 (추가 정보 저장) ---
-    downloadTrigger.addEventListener('click', (event) => {
-      console.log("[Content Script] Download trigger clicked!");
-      // event.preventDefault(); // 기본 동작 허용
-
-      const paperTitle = getPaperTitle();
-      const authors = getAuthors();
-      const journalInfo = getJournalInfo(); // ★★★ 저널 정보 가져오기 ★★★
-      const volumePageInfo = getVolumePageInfo(); // ★★★ 볼륨/페이지 정보 가져오기 ★★★
-
-      if (paperTitle) { // 제목은 필수
-        console.log("[Content Script] Storing extended paper info to local storage.");
-        console.log("  > Title:", paperTitle);
-        console.log("  > Authors:", authors || "Not Found");
-        console.log("  > Journal:", journalInfo || "Not Found"); // ★★★ 로그 추가 ★★★
-        console.log("  > Vol/Page:", volumePageInfo || "Not Found"); // ★★★ 로그 추가 ★★★
-
-        // ★★★ 모든 정보를 함께 저장 ★★★
-        chrome.storage.local.set({
-          kciPaperTitle: paperTitle,
-          kciAuthors: authors,
-          kciJournal: journalInfo, // 저널 정보 저장
-          kciVolPage: volumePageInfo // 볼륨/페이지 정보 저장
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.error(`[Content Script] Error saving data to storage: ${chrome.runtime.lastError.message}`);
-          } else {
-            console.log("[Content Script] Extended info saved to storage successfully.");
-          }
+    // 한글 저자 못 찾았을 경우, 차선책으로 괄호 제거된 모든 이름 가져오기 (중복 제거)
+    if (authorsArray.length === 0) {
+        console.log("[KCI Content] No Korean authors found directly. Trying fallback for authors.");
+        authorElements.forEach(el => {
+            let authorText = (el.nodeType === Node.TEXT_NODE ? el.textContent : getCleanText(el)).trim();
+            if (authorText) {
+                authorText = authorText.replace(/\s*\(.*?\)\s*/g, '').trim();
+                authorText = authorText.replace(/\d+$/, '').trim();
+                authorText = authorText.replace(/,$/, '').trim();
+                if (authorText.length > 0 && !authorsArray.includes(authorText)) {
+                    authorsArray.push(authorText);
+                }
+            }
         });
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    }
 
-      } else {
-        console.error("[Content Script] Could not get paper title at click time. Cannot save data.");
-      }
-    });
-
-  } else {
-    console.warn("[Content Script] Download trigger element not found with selector:", downloadTriggerSelector);
-  }
+    if (authorsArray.length > 0) {
+        return Array.from(new Set(authorsArray)).join(", ").replace(/외\s*\d+(명|인)/gi, '').replace(/,\s*$/, '').trim();
+    }
+    return "저자없음";
 }
 
-// --- 실행 지연 시간 유지 (1.5초) ---
-console.log("[Content Script] Waiting 1500ms before searching for elements...");
-setTimeout(() => {
-  console.log("[Content Script] Executing element search and listener attachment after extended timeout.");
-  // 페이지 로드 시 모든 정보 미리 한번 찾아봄 (선택사항)
-  getPaperTitle();
-  getAuthors();
-  getJournalInfo();
-  getVolumePageInfo();
-  addDownloadListener();
-}, 1500);
-// --- ★★★★★★★★★★★★★★★★★★★★★★ ---
+
+function extractArticleInfo() {
+    let artiId = null;
+    const urlParams = new URLSearchParams(window.location.search);
+    artiId = urlParams.get('sereArticleSearchBean.artiId') || urlParams.get('artiId');
+    if (!artiId && window.location.pathname.includes('ciSereArtiView.kci')) {
+        const pathParts = window.location.pathname.split('/');
+        const lastPart = pathParts[pathParts.length - 1];
+        if (lastPart.startsWith("ART")) artiId = lastPart;
+    }
+
+    if (!artiId) {
+        console.warn("[KCI Content] Could not extract artiId from page:", window.location.href);
+        return;
+    }
+    console.log("[KCI Content] Attempting to extract info for artiId:", artiId);
+
+    let title = "제목없음";
+    let authors = "저자없음";
+    let journalName = "학술지없음";
+
+    // 1. 팝업창 스타일 정보 추출 시도 (CSS 선택자 정확성 매우 중요!)
+    const popTitleElement = document.querySelector('.po_pop_tit h1');
+    const popAuthorContainer = document.querySelector('.po_pop_tit .aut');
+    const popJournalSourceElement = document.querySelector('.po_pop_source span:first-of-type'); // 좀 더 구체적으로
+
+    if (popTitleElement && popAuthorContainer && popJournalSourceElement) {
+        console.log("[KCI Content] Extracting from Popup Style Elements.");
+        title = getCleanText(popTitleElement);
+        authors = extractAuthors(popAuthorContainer, true); // isPopup = true
+        let tempJournal = getCleanText(popJournalSourceElement.querySelector('a') || popJournalSourceElement);
+        journalName = tempJournal.split(/,|Vol\.|제\d+권|ISSN/)[0].trim() || "학술지없음";
+    } else {
+        // 2. 상세 페이지 스타일 정보 추출 시도 (CSS 선택자 정확성 매우 중요!)
+        console.log("[KCI Content] Extracting from Detail Page Style Elements.");
+        const detailTitleElement = document.querySelector('#artiTitle') || document.querySelector('h3.title') || document.querySelector('div.view_title h2');
+        const detailAuthorContainer = document.querySelector('div.author, div.info_author ul, ul.authorList, p.author'); // 여러 저자 컨테이너 후보
+        const detailJournalElement = document.querySelector('p.jounal a, .jounral_box .j_name > a, span.txt_pubName a, dd.journalInfo a');
+
+        if (detailTitleElement) {
+            title = getCleanText(detailTitleElement);
+        } else {
+            const metaTitle = document.querySelector('meta[name="citation_title"]');
+            if (metaTitle) title = metaTitle.content.trim();
+        }
+
+        if (detailAuthorContainer) {
+            authors = extractAuthors(detailAuthorContainer, false); // isPopup = false
+        }
+        // 상세 페이지에서 요소로 저자 못 찾았으면 메타 태그 시도 (한글 우선)
+        if (authors === "저자없음") {
+            const authorMetaTags = document.querySelectorAll('meta[name="citation_author"]');
+            let metaAuthorsArray = [];
+            if (authorMetaTags.length > 0) {
+                authorMetaTags.forEach(tag => {
+                    let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+                    if (metaAuthorText.length >= 2 && /^[가-힣\s]+$/.test(metaAuthorText)) {
+                        if (!metaAuthorsArray.includes(metaAuthorText)) metaAuthorsArray.push(metaAuthorText);
+                    }
+                });
+                if (metaAuthorsArray.length === 0) { // 한글 메타 저자 없으면 모든 메타 저자(괄호 제거)
+                     authorMetaTags.forEach(tag => {
+                        let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+                        if (metaAuthorText.length > 0 && !metaAuthorsArray.includes(metaAuthorText)) metaAuthorsArray.push(metaAuthorText);
+                     });
+                }
+            }
+            if (metaAuthorsArray.length > 0) {
+                authors = Array.from(new Set(metaAuthorsArray)).join(", ").replace(/외\s*\d+(명|인)/gi, '').replace(/,\s*$/, '').trim();
+            }
+        }
+
+
+        if (detailJournalElement) {
+            let tempJournal = getCleanText(detailJournalElement);
+            journalName = tempJournal.split(/,|Vol\.|제\d+권|ISSN/)[0].trim() || "학술지없음";
+        } else {
+            const metaJournal = document.querySelector('meta[name="citation_journal_title"]');
+            if (metaJournal) journalName = metaJournal.content.trim().split(/,|Vol\.|제\d+권|ISSN/)[0].trim() || "학술지없음";
+        }
+    }
+    if (title.length === 0) title = "제목없음";
+    if (authors.length === 0) authors = "저자없음";
+    if (journalName.length === 0) journalName = "학술지없음";
+
+    const articleData = { title, authors, journalName, timestamp: new Date().getTime() };
+
+    if (articleData.title === "제목없음" && articleData.authors === "저자없음" && articleData.journalName === "학술지없음") {
+        console.warn("[KCI Content] Failed to extract any meaningful data for artiId:", artiId);
+        return;
+    }
+
+    const dataToStore = {};
+    dataToStore[artiId] = articleData;
+    chrome.storage.local.set(dataToStore, () => {
+        if (chrome.runtime.lastError) {
+            console.error("[KCI Content] Error saving data for", artiId, ":", chrome.runtime.lastError.message);
+        } else {
+            console.log("[KCI Content] Data saved for", artiId, ":", articleData);
+        }
+    });
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(extractArticleInfo, 1000); // 페이지가 완전히 그려질 시간을 좀 더 줌
+} else {
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(extractArticleInfo, 1000);
+    });
+}

@@ -1,17 +1,35 @@
 {
   "manifest_version": 3,
   "name": "KCI 논문 상세 정보로 저장",
-  "version": "1.1",
+  "version": "1.4", // 버전 업데이트
   "description": "KCI에서 논문 PDF 다운로드 시 파일명을 '저자명_논문제목_학술지명'으로 변경합니다.",
   "permissions": [
     "downloads",
-    "scripting"
+    // "scripting", // 백그라운드에서 직접 executeScript를 사용하지 않는다면 제거 가능
+    "storage",
+    "offscreen"
   ],
   "host_permissions": [
     "*://*.kci.go.kr/*"
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci*",
+        "*://*.kci.go.kr/kciportal/po/search/poSereArtiNonView.kci*", // 원문보기 팝업 등
+        "*://*.kci.go.kr/kciportal/po/search/poSereArtiView.kci*"     // 다른 원문보기 형태
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle" // 페이지 주요 콘텐츠 로드 후 실행
+    }
+  ],
+  "offscreen": {
+    "path": "offscreen.html",
+    "reasons": ["DOM_PARSER"],
+    "justification": "Parse HTML string to extract KCI article details from fetched pages."
   },
   "icons": {
     "16": "icons/icon16.png",
