@@ -1,107 +1,101 @@
-// background.js --- 볼륨/페이지 부분 포맷 유지 ---
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    // KCI PDF 다운로드 URL은 'po=common' 또는 'po=pdf' 등을 포함하는 경우가 많습니다.
+    // 좀 더 확실하게 하려면 KCI 원문보기 팝업창의 URL 패턴을 확인해야 합니다.
+    // 예: item.url.includes("pdfView.kci") 또는 item.url.includes("pdfDownload.kci") 등
+    // 기존 로직은 item.url.includes("po=common")를 사용했으므로 이를 유지하거나 개선할 수 있습니다.
+    if (item.url.includes("po=common") || item.filename.toLowerCase().endsWith(".pdf")) { // KCI PDF 다운로드 URL 특징 또는 일반 PDF
+        chrome.scripting.executeScript({
+            target: { tabId: item.tabId },
+            func: () => {
+                // 논문 제목 추출
+                const titleElement = document.querySelector('.po_pop_tit h1');
+                let title = titleElement ? titleElement.innerText.trim() : "제목없음";
 
-console.log("Background script loaded and running! (Preserve Vol/Page Formatting Mode)");
+                // 저자명 추출
+                // 저자 정보는 .po_pop_tit .aut 내부에 여러 span 또는 a 태그로 나뉘어 있을 수 있습니다.
+                // "홍길동, 김철수 외 2명" 같은 형태일 수 있으므로 "외 N명" 부분은 제거하는 것이 좋습니다.
+                const authorContainer = document.querySelector('.po_pop_tit .aut');
+                let authors = "저자없음";
+                if (authorContainer) {
+                    authors = Array.from(authorContainer.childNodes)
+                        .map(node => node.textContent.trim())
+                        .filter(text => text) // 빈 텍스트 노드 제거
+                        .join(", ") // 쉼표와 공백으로 저자 구분 (예: "홍길동, 김철수")
+                        .replace(/외\s*\d+명/gi, '') // "외 N명" 제거
+                        .replace(/,\s*$/, '') // 맨 뒤에 남은 쉼표 제거
+                        .trim();
+                    if (!authors) authors = "저자없음"; // 모든 처리 후 비어있다면 기본값
+                }
+                
+                // 학술지명 추출
+                // 학술지명은 .po_pop_source 내부의 첫번째 span에 있거나, 그 안의 a 태그에 있을 가능성이 높습니다.
+                let journalName = "학술지없음";
+                const journalSourceElement = document.querySelector('.po_pop_source');
+                if (journalSourceElement) {
+                    const firstSpan = journalSourceElement.querySelector('span:first-of-type');
+                    if (firstSpan) {
+                        const linkInSpan = firstSpan.querySelector('a');
+                        if (linkInSpan) {
+                            journalName = linkInSpan.innerText.trim();
+                        } else {
+                            journalName = firstSpan.innerText.trim();
+                            // 학술지명 뒤에 " Vol.XX No.Y, pp.111-222" 등이 붙는 경우가 있으므로,
+                            // 순수 학술지명만 필요하다면 추가적인 정제 필요
+                            // 예: journalName = journalName.split(' Vol.')[0].split(' 제')[0].trim();
+                        }
+                    }
+                }
 
-/**
- * 파일명 부분 정리 함수 (공백, 쉼표 등을 '_'로 변경)
- * - 저자, 저널명 처리에 사용
- */
-function sanitizeFilenamePart(part, defaultName = 'unknown') {
-  if (!part) { return defaultName; }
-  let sanitized = part.replace(/[\/\\:*?"<>|]/g, '_'); // 금지문자 -> _
-  sanitized = sanitized.replace(/[\x00-\x1F\x7F]/g, '');
-  sanitized = sanitized.replace(/[,;]/g, '_');       // 쉼표, 세미콜론 -> _
-  sanitized = sanitized.replace(/\s+/g, '_');         // 공백 -> _
-  sanitized = sanitized.replace(/^_+|_+$/g, '');     // 앞뒤 _ 제거
-  if (!sanitized || sanitized === '.' || sanitized === '...') { return defaultName; }
-  return sanitized;
-}
+                return { title, authors, journalName };
+            }
+        }, (injectionResults) => {
+            if (chrome.runtime.lastError) {
+                console.error("KCI Filename Script Error:", chrome.runtime.lastError.message);
+                suggest(); // 에러 발생 시 기본 파일명 사용
+                return;
+            }
 
-/**
- * ★★★ 포맷(공백, 쉼표, 마침표 등) 유지하며 정리하는 함수 (이름 변경 및 수정) ★★★
- * - 제목, 볼륨/페이지 정보 처리에 사용
- * - 파일명 금지 문자만 제거
- */
-function sanitizePreservingFormatting(text, defaultName = 'unknown_part', maxLength = 100) {
-  if (!text) { return defaultName; }
-  let sanitized = text.replace(/[\/\\:*?"<>|]/g, ''); // 금지문자 제거
-  sanitized = sanitized.replace(/[\x00-\x1F\x7F]/g, '');
-  // 마침표(.)와 쉼표(,)는 유지하고, 연속 공백만 단일 공백으로 변경
-  sanitized = sanitized.replace(/\s+/g, ' ').trim();
-  if (!sanitized || sanitized === '.') { return defaultName; }
-  // 길이 제한 (기본 100자, 필요시 호출 시 변경 가능)
-  if (maxLength > 0 && sanitized.length > maxLength) {
-      sanitized = sanitized.substring(0, maxLength) + '...';
-  }
-  return sanitized;
-}
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            if (injectionResults && injectionResults[0] && injectionResults[0].result) {
+                const { title, authors, journalName } = injectionResults[0].result;
 
-chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  const downloadUrl = downloadItem.url;
-  const referrerUrl = downloadItem.referrer;
-  const finalUrl = downloadItem.finalUrl;
+                // 파일명으로 사용할 수 없는 문자 제거 및 공백 처리 함수
+                const sanitizeFilename = (str) => {
+                    if (!str) return "";
+                    return str.replace(/[\\/:*?"<>|]/g, "_") // 불법 문자 '_'로 치환
+                              .replace(/\s+/g, " ") // 여러 공백을 단일 공백으로
+                              .trim(); 
+                };
+                
+                const cleanAuthors = sanitizeFilename(authors);
+                const cleanTitle = sanitizeFilename(title);
+                const cleanJournalName = sanitizeFilename(journalName);
 
-  const kciArticlePagePattern = /kci\.go\.kr\/kciportal\/ci\/sereArticleSearch\/ciSereArtiView\.kci/i;
-  const kciPdfUrlPattern = /kci\.go\.kr\/kciportal\/co\/download\/popup\/poDownload\.kci/i;
-  const containsFileIdPattern = /orteFileId=KCI_FI/i;
+                let filename = `${cleanAuthors}_${cleanTitle}_${cleanJournalName}`;
+                
+                // 파일명 길이 제한 (OS 및 파일 시스템에 따라 다름, 예: 200자)
+                // .pdf 확장자(4자)와 구분자 '_' (2자)를 고려하여 실제 내용 길이는 조금 더 짧게
+                const maxLength = 240; 
+                if (filename.length > maxLength) {
+                    // 각 부분이 너무 길 경우를 대비해 균형있게 자르거나, 중요도에 따라 자를 수 있음
+                    // 여기서는 단순하게 전체 길이를 자릅니다.
+                    filename = filename.substring(0, maxLength);
+                }
+                
+                // 마지막이 '_'로 끝나면 제거 (예: 정보 중 하나가 없을 때)
+                filename = filename.replace(/_+$/, '').trim();
 
-  // console.log("[Background] onDeterminingFilename triggered."); // 로그 간소화
-
-  if (referrerUrl && kciArticlePagePattern.test(referrerUrl) && kciPdfUrlPattern.test(finalUrl) && (containsFileIdPattern.test(downloadUrl) || containsFileIdPattern.test(finalUrl)) ) {
-    console.log("[Background] KCI PDF download DETECTED based on finalUrl!");
-
-    chrome.storage.local.get(['kciPaperTitle', 'kciAuthors', 'kciJournal', 'kciVolPage'], (result) => {
-      chrome.storage.local.remove(['kciPaperTitle', 'kciAuthors', 'kciJournal', 'kciVolPage']);
-
-      if (chrome.runtime.lastError) {
-        console.error(`[Background] Error retrieving data from storage: ${chrome.runtime.lastError.message}`);
-        suggest();
-        return;
-      }
-
-      const paperTitle = result.kciPaperTitle;
-      const authors = result.kciAuthors;
-      const journal = result.kciJournal;
-      const volPage = result.kciVolPage;
-
-      if (paperTitle) {
-        console.log("[Background] Retrieved data from storage (Raw):");
-        console.log("  >", paperTitle, authors, journal, volPage);
-
-        // 3. 파일명 각 부분 정리
-        const safeAuthors = sanitizeFilenamePart(authors, 'unknown_author');         // 저자 (공백->_)
-        const cleanTitle = sanitizePreservingFormatting(paperTitle, 'untitled_paper', 100); // 제목 (공백유지, 100자 제한)
-        const safeJournal = sanitizeFilenamePart(journal, 'unknown_journal');         // 저널 (공백->_)
-        // ★★★ 볼륨/페이지 정보 처리 시 sanitizePreservingFormatting 사용 ★★★
-        const cleanVolPage = sanitizePreservingFormatting(volPage, 'unknown_volpage', 0); // 볼륨/페이지 (공백/쉼표/마침표 유지, 길이 제한 없음(0))
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-        console.log("  >> Sanitized Authors:", `"${safeAuthors}"`);
-        console.log("  >> Cleaned Title:", `"${cleanTitle}"`);
-        console.log("  >> Sanitized Journal:", `"${safeJournal}"`);
-        console.log("  >> Cleaned Vol/Page:", `"${cleanVolPage}"`); // ★★★ 변수명 변경 및 로그 추가 ★★★
-
-        // 최종 파일명 조합
-        // ★★★ 변수명 cleanVolPage 사용 ★★★
-        const newFilename = `${safeAuthors}_${cleanTitle}_${safeJournal}_${cleanVolPage}.pdf`;
-
-        // 길이 제한 로직은 일단 제거 (필요하다면 이전 버전처럼 다시 추가 가능)
-        console.log("[Background] Suggesting final filename:", newFilename);
-        suggest({ filename: newFilename, conflictAction: 'uniquify' });
-
-      } else {
-        console.warn("[Background] Paper title not found in storage. Using default filename.");
-        suggest();
-      }
-    });
-    return true; // 비동기 suggest
-
-  } else {
-    // console.log("[Background] Conditions not met. Ignoring.");
-  }
-});
-
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("[KCI Save as Title] Extension installed or updated. (Preserve Vol/Page Formatting Mode)");
+                if (!filename || filename === "_" || filename === "__") { // 모든 정보가 없거나 부적절한 경우
+                    suggest({ filename: "KCI_다운로드.pdf" }); // 기본 대체 파일명
+                } else {
+                    suggest({ filename: `${filename}.pdf` });
+                }
+                
+            } else {
+                console.log("KCI Filename: 정보를 가져오지 못했습니다. 기본 파일명을 사용합니다.");
+                suggest(); // 정보를 가져오지 못한 경우 기본 파일명 사용
+            }
+        });
+        return true; // 비동기 응답을 위해 true 반환
+    }
+    suggest(); // KCI PDF가 아니거나 조건에 맞지 않으면 기본 파일명 사용
 });

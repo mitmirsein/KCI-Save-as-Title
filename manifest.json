@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "KCI Save as Title",
-  "version": "1.3", // 아이콘 추가로 버전 업데이트
-  "description": "Downloads KCI papers with their titles as filenames.",
+  "name": "KCI 논문 상세 정보로 저장",
+  "version": "1.1",
+  "description": "KCI에서 논문 PDF 다운로드 시 파일명을 '저자명_논문제목_학술지명'으로 변경합니다.",
   "permissions": [
     "downloads",
-    "storage"
+    "scripting"
   ],
   "host_permissions": [
     "*://*.kci.go.kr/*"
@@ -13,17 +13,9 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["*://*.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "icons": {
-    "16": "kci-icon-16.png",
-    "32": "kci-icon-32.png",
-    "48": "kci-icon-48.png",
-    "128": "kci-icon-128.png"
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }
