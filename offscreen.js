@@ -1,5 +1,30 @@
 // offscreen.js
 
+// 영문명 제거 함수 추가
+function cleanAuthorName(authorText) {
+    if (!authorText) return '';
+    
+    // 영문명 제거: 언더스코어나 공백으로 구분된 영문 부분 제거
+    let cleanedAuthor = authorText
+        .replace(/[_\s]*[A-Za-z\s,._]+[_\s]*/g, '') // 영문 부분 제거
+        .replace(/^\s+|\s+$/g, '') // 앞뒤 공백 제거
+        .replace(/^[,_\s]+|[,_\s]+$/g, ''); // 앞뒤 구분자 제거
+    
+    return cleanedAuthor;
+}
+
+// 부제 제거 함수 추가
+function cleanTitle(titleText) {
+    if (!titleText) return '';
+    
+    // 부제 제거: 하이픈으로 시작하는 부분 제거
+    let cleanedTitle = titleText
+        .replace(/\s*[-–—]\s*.*$/, '') // 하이픈 이후 모든 내용 제거
+        .replace(/^\s+|\s+$/g, ''); // 앞뒤 공백 제거
+    
+    return cleanedTitle;
+}
+
 // 헬퍼 함수: 요소에서 실제 텍스트만 추출 (sup 등 불필요한 태그 제거)
 function getCleanInnerText(element) {
     if (!element) return "";
@@ -46,6 +71,8 @@ function extractAuthorsFromDoc(doc) {
                     authorText = authorText.replace(/\s*\(.*?\)\s*/g, '').trim(); // 괄호 안 내용 제거
                     authorText = authorText.replace(/\d+$/, '').trim();          // 끝 숫자(각주 등) 제거
                     authorText = authorText.replace(/,$/, '').trim();            // 끝 쉼표 제거
+                    // 영문명 제거 적용
+                    authorText = cleanAuthorName(authorText);
                     if (authorText.length >= 2 && /^[가-힣\s]+$/.test(authorText)) { // 한글 이름 (2자 이상)
                         if (!authorsArray.includes(authorText)) {
                             authorsArray.push(authorText);
@@ -62,6 +89,8 @@ function extractAuthorsFromDoc(doc) {
         if (authorMetaTags.length > 0) {
             authorMetaTags.forEach(tag => {
                 let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+                // 영문명 제거 적용
+                metaAuthorText = cleanAuthorName(metaAuthorText);
                 if (metaAuthorText.length >= 2 && /^[가-힣\s]+$/.test(metaAuthorText)) { // 한글 이름
                      if (!authorsArray.includes(metaAuthorText)) authorsArray.push(metaAuthorText);
                 }
@@ -82,6 +111,8 @@ function extractAuthorsFromDoc(doc) {
                         authorText = authorText.replace(/\s*\(.*?\)\s*/g, '').trim();
                         authorText = authorText.replace(/\d+$/, '').trim();
                         authorText = authorText.replace(/,$/, '').trim();
+                        // 영문명 제거 적용
+                        authorText = cleanAuthorName(authorText);
                         if (authorText.length > 0 && !authorsArray.includes(authorText)) { // 어떤 이름이든 추가
                             authorsArray.push(authorText);
                         }
@@ -95,6 +126,8 @@ function extractAuthorsFromDoc(doc) {
         const authorMetaTags = doc.querySelectorAll('meta[name="citation_author"]');
         authorMetaTags.forEach(tag => {
             let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+            // 영문명 제거 적용
+            metaAuthorText = cleanAuthorName(metaAuthorText);
             if (metaAuthorText.length > 0 && !authorsArray.includes(metaAuthorText)) {
                  authorsArray.push(metaAuthorText);
             }
@@ -129,7 +162,7 @@ chrome.runtime.onMessage.addListener(async (message) => {
         for (const selector of titleSelectors) {
             const text = getCleanTextFromDocViaSelector(doc, selector); // 수정된 헬퍼 함수 사용
             if (text && text.length > 0 && text !== "제목없음") { // 유효한 텍스트인지 확인
-                title = text;
+                title = cleanTitle(text); // 부제 제거 적용
                 break;
             }
         }

@@ -7,6 +7,31 @@ function getCleanText(element) {
     return clone.innerText.trim();
 }
 
+// 영문명 제거 함수 추가
+function cleanAuthorName(authorText) {
+    if (!authorText) return '';
+    
+    // 영문명 제거: 언더스코어나 공백으로 구분된 영문 부분 제거
+    let cleanedAuthor = authorText
+        .replace(/[_\s]*[A-Za-z\s,._]+[_\s]*/g, '') // 영문 부분 제거
+        .replace(/^\s+|\s+$/g, '') // 앞뒤 공백 제거
+        .replace(/^[,_\s]+|[,_\s]+$/g, ''); // 앞뒤 구분자 제거
+    
+    return cleanedAuthor;
+}
+
+// 부제 제거 함수 추가
+function cleanTitle(titleText) {
+    if (!titleText) return '';
+    
+    // 부제 제거: 하이픈으로 시작하는 부분 제거
+    let cleanedTitle = titleText
+        .replace(/\s*[-–—]\s*.*$/, '') // 하이픈 이후 모든 내용 제거
+        .replace(/^\s+|\s+$/g, ''); // 앞뒤 공백 제거
+    
+    return cleanedTitle;
+}
+
 function extractAuthors(containerElement, isPopup = false) {
     let authorsArray = [];
     if (!containerElement) return "저자없음";
@@ -26,7 +51,9 @@ function extractAuthors(containerElement, isPopup = false) {
             authorText = authorText.replace(/\d+$/, '').trim();
             // 3. 이름 뒤에 붙는 쉼표 제거
             authorText = authorText.replace(/,$/, '').trim();
-            // 4. 한글 이름인지 확인 (2자 이상)
+            // 4. 영문명 제거 추가
+            authorText = cleanAuthorName(authorText);
+            // 5. 한글 이름인지 확인 (2자 이상)
             if (authorText.length >= 2 && /^[가-힣\s]+$/.test(authorText)) {
                 if (!authorsArray.includes(authorText)) { // 중복 방지
                     authorsArray.push(authorText);
@@ -44,6 +71,8 @@ function extractAuthors(containerElement, isPopup = false) {
                 authorText = authorText.replace(/\s*\(.*?\)\s*/g, '').trim();
                 authorText = authorText.replace(/\d+$/, '').trim();
                 authorText = authorText.replace(/,$/, '').trim();
+                // 영문명 제거 추가
+                authorText = cleanAuthorName(authorText);
                 if (authorText.length > 0 && !authorsArray.includes(authorText)) {
                     authorsArray.push(authorText);
                 }
@@ -85,7 +114,7 @@ function extractArticleInfo() {
 
     if (popTitleElement && popAuthorContainer && popJournalSourceElement) {
         console.log("[KCI Content] Extracting from Popup Style Elements.");
-        title = getCleanText(popTitleElement);
+        title = cleanTitle(getCleanText(popTitleElement)); // 부제 제거 적용
         authors = extractAuthors(popAuthorContainer, true); // isPopup = true
         let tempJournal = getCleanText(popJournalSourceElement.querySelector('a') || popJournalSourceElement);
         journalName = tempJournal.split(/,|Vol\.|제\d+권|ISSN/)[0].trim() || "학술지없음";
@@ -97,10 +126,10 @@ function extractArticleInfo() {
         const detailJournalElement = document.querySelector('p.jounal a, .jounral_box .j_name > a, span.txt_pubName a, dd.journalInfo a');
 
         if (detailTitleElement) {
-            title = getCleanText(detailTitleElement);
+            title = cleanTitle(getCleanText(detailTitleElement)); // 부제 제거 적용
         } else {
             const metaTitle = document.querySelector('meta[name="citation_title"]');
-            if (metaTitle) title = metaTitle.content.trim();
+            if (metaTitle) title = cleanTitle(metaTitle.content.trim()); // 부제 제거 적용
         }
 
         if (detailAuthorContainer) {
@@ -113,6 +142,8 @@ function extractArticleInfo() {
             if (authorMetaTags.length > 0) {
                 authorMetaTags.forEach(tag => {
                     let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+                    // 영문명 제거 적용
+                    metaAuthorText = cleanAuthorName(metaAuthorText);
                     if (metaAuthorText.length >= 2 && /^[가-힣\s]+$/.test(metaAuthorText)) {
                         if (!metaAuthorsArray.includes(metaAuthorText)) metaAuthorsArray.push(metaAuthorText);
                     }
@@ -120,6 +151,8 @@ function extractArticleInfo() {
                 if (metaAuthorsArray.length === 0) { // 한글 메타 저자 없으면 모든 메타 저자(괄호 제거)
                      authorMetaTags.forEach(tag => {
                         let metaAuthorText = tag.content.trim().replace(/\s*\(.*?\)\s*/g, '').trim();
+                        // 영문명 제거 적용
+                        metaAuthorText = cleanAuthorName(metaAuthorText);
                         if (metaAuthorText.length > 0 && !metaAuthorsArray.includes(metaAuthorText)) metaAuthorsArray.push(metaAuthorText);
                      });
                 }
