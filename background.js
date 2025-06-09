@@ -1,6 +1,48 @@
 // background.js
+
 const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
 let creatingOffscreenPromise = null;
+
+/**
+ * 주어진 정보로 시스템에 안전한 파일명을 생성합니다.
+ * 파일명 길이 제한, 유효하지 않은 문자 제거/치환, 확장자 보존 기능을 포함합니다.
+ * @param {object} info - { title, authors, journalName } 객체.
+ * @param {string} extension - 파일 확장자 (예: 'pdf').
+ * @param {number} [maxLength=150] - 파일명(확장자 제외)의 최대 바이트 길이에 가까운 문자열 길이.
+ * @returns {string} - 안전하게 처리된 최종 파일명.
+ */
+function createSafeFilename(info, extension, maxLength = 150) {
+    const { title = "제목없음", authors = "저자없음" } = info;
+
+    // 1. 각 부분을 정제 (파일명에 부적합한 문자 _로 변경, 연속 공백/밑줄 단일화)
+    const sanitize = (str) => str.replace(/[\\/:\*\?"<>|]/g, '_').replace(/[\s_]+/g, '_').trim();
+
+    const cleanAuthors = sanitize(authors);
+    const cleanTitle = sanitize(title);
+    
+    // 파일명 단축을 위해 학술지명은 기본적으로 제외. 필요시 아래 주석을 활성화하세요.
+    // const { journalName = "학술지없음" } = info;
+    // const cleanJournalName = sanitize(journalName);
+    // let baseString = `${cleanAuthors}_${cleanTitle}_${cleanJournalName}`;
+    let baseString = `${cleanAuthors}_${cleanTitle}`;
+
+    // 2. 파일명 길이 제한 (maxLength는 바이트가 아닌 문자 수 기준이므로 여유롭게 설정)
+    let truncatedString = baseString;
+    if (truncatedString.length > maxLength) {
+        truncatedString = truncatedString.substring(0, maxLength);
+    }
+
+    // 3. 마지막이 잘린 밑줄이거나, 시작/끝에 불필요한 밑줄 제거 및 연속 밑줄 정리
+    let finalString = truncatedString.replace(/__+/g, '_').replace(/^_|_$/g, '');
+    
+    // 4. 모든 정보가 비어있거나 유효하지 않을 경우를 대비한 기본 파일명
+    if (!finalString || finalString === "_" || finalString === "저자없음_제목없음") {
+        return `KCI_다운로드_${new Date().getTime()}.${extension}`;
+    }
+
+    return `${finalString}.${extension}`;
+}
+
 
 async function hasOffscreenDocument() {
     if (chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function') {
@@ -18,7 +60,6 @@ async function hasOffscreenDocument() {
 
 async function setupOffscreenDocument() {
     if (await hasOffscreenDocument()) {
-        // console.log("[KCI Background] Offscreen document already exists.");
         return;
     }
     if (creatingOffscreenPromise) {
@@ -50,14 +91,13 @@ async function parseHtmlViaOffscreen(artiId, htmlText) {
             console.error(`[KCI Background] Timeout waiting for offscreen response for ${artiId}`);
             chrome.runtime.onMessage.removeListener(listener);
             resolve(null);
-        }, 5000); // 5초 타임아웃
+        }, 5000);
 
         const listener = (message) => {
             if (message.type === 'parse-html-response' && message.artiId === artiId) {
                 clearTimeout(timeout);
                 chrome.runtime.onMessage.removeListener(listener);
                 if (message.success) {
-                    // console.log(`[KCI Background] Parsed via offscreen for ${artiId}:`, message.data);
                     resolve(message.data);
                 } else {
                     console.error(`[KCI Background] Offscreen parsing failed for ${artiId}:`, message.error);
@@ -67,7 +107,6 @@ async function parseHtmlViaOffscreen(artiId, htmlText) {
         };
         chrome.runtime.onMessage.addListener(listener);
 
-        // console.log(`[KCI Background] Sending HTML to offscreen for parsing, artiId: ${artiId}`);
         chrome.runtime.sendMessage({
             type: 'parse-html-for-kci',
             data: { htmlText, artiId }
@@ -82,8 +121,6 @@ async function parseHtmlViaOffscreen(artiId, htmlText) {
 
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    // console.log("[KCI Background] onDeterminingFilename. URL:", item.url, "Filename:", item.filename);
-
     let artiId = null;
     try {
         const urlObj = new URL(item.url);
@@ -102,8 +139,6 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
         // console.warn("[KCI Background] Could not parse URL/filename for artiId:", e.message);
     }
 
-    // console.log(`[KCI Background] Extracted artiId: ${artiId}`);
-
     if (artiId) {
         const currentArtiId = artiId;
         chrome.storage.local.get(currentArtiId, async (storedData) => {
@@ -112,68 +147,51 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
             }
 
             let articleInfo = storedData ? storedData[currentArtiId] : null;
-            let infoSource = "storage";
 
-            if (articleInfo) {
-                // console.log(`[KCI Background] Data found in storage for ${currentArtiId}.`);
-            } else {
-                // console.log(`[KCI Background] No data in storage for ${currentArtiId}. Fetching...`);
+            if (!articleInfo) {
                 const detailPageUrl = `https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=${currentArtiId}`;
                 try {
                     const response = await fetch(detailPageUrl);
                     if (!response.ok) {
                         console.error(`[KCI Background] Failed to fetch detail page for ${currentArtiId}: ${response.status}`);
-                        suggest(); return;
+                        suggest({ conflictAction: 'uniquify' }); return;
                     }
                     const htmlText = await response.text();
                     articleInfo = await parseHtmlViaOffscreen(currentArtiId, htmlText);
-                    infoSource = "fetch_offscreen";
 
                     if (articleInfo) {
                         const dataToStore = {};
                         dataToStore[currentArtiId] = { ...articleInfo, timestamp: new Date().getTime() };
                         chrome.storage.local.set(dataToStore, () => {
                             if (chrome.runtime.lastError) console.error("[KCI Background] Error saving fetched data for", currentArtiId, ":", chrome.runtime.lastError.message);
-                            // else console.log(`[KCI Background] Fetched data for ${currentArtiId} saved to storage.`);
                         });
                     } else {
                         console.log(`[KCI Background] Failed to parse details for ${currentArtiId} via offscreen. Using default filename.`);
-                        suggest(); return;
+                        suggest({ conflictAction: 'uniquify' }); return;
                     }
                 } catch (fetchError) {
                     console.error(`[KCI Background] Error fetching detail page for ${currentArtiId}:`, fetchError);
-                    suggest(); return;
+                    suggest({ conflictAction: 'uniquify' }); return;
                 }
             }
 
             if (articleInfo) {
-                const { title, authors, journalName } = articleInfo;
-                // console.log(`[KCI Background] Using info (source: ${infoSource}) for ${currentArtiId}: T='${title}', A='${authors}', J='${journalName}'`);
+                // 새로 만든 함수를 호출하여 안전한 파일명을 한 번에 생성합니다.
+                const newFilename = createSafeFilename(articleInfo, 'pdf', 150); // maxLength는 100~150 사이에서 조절
 
-                const sanitizeFilename = (str) => str ? str.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_").trim() : ""; // 공백도 밑줄로
-
-                const cleanAuthors = sanitizeFilename(authors);
-                const cleanTitle = sanitizeFilename(title);
-                const cleanJournalName = sanitizeFilename(journalName);
-
-                let filename = `${cleanAuthors}_${cleanTitle}_${cleanJournalName}`;
-                const maxLength = 200; // 파일명 길이 조금 더 줄임
-                if (filename.length > maxLength) filename = filename.substring(0, maxLength);
-                filename = filename.replace(/_+$/, '').replace(/^_+/, '').replace(/__+/g, '_').trim();
-
-                if (!filename || filename === "_" || (cleanAuthors === "저자없음" && cleanTitle === "제목없음" && cleanJournalName === "학술지없음")) {
-                    suggest({ filename: `KCI_다운로드_${currentArtiId || '파일'}.pdf` });
-                } else {
-                    suggest({ filename: `${filename}.pdf` });
-                }
+                console.log(`[KCI Background] Original Info: T='${articleInfo.title}', A='${articleInfo.authors}'`);
+                console.log(`[KCI Background] Generated Safe Filename: ${newFilename}`);
+                
+                suggest({ filename: newFilename,
+                          conflictAction: 'uniquify' 
+                });
             } else {
-                // console.log(`[KCI Background] No article info available for ${currentArtiId}. Using default filename.`);
-                suggest();
+                console.log(`[KCI Background] No article info available for ${currentArtiId}. Using default.`);
+                suggest({ filename: `KCI_다운로드_${currentArtiId || '파일'}.pdf`, conflictAction: 'uniquify' });
             }
         });
-        return true;
+        return true; // 비동기 작업을 위해 항상 true 반환
     } else {
-        // console.log("[KCI Background] Could not extract artiId. Using default filename.");
-        suggest();
+        suggest(); // artiId가 없을 경우 기본 동작
     }
 });
